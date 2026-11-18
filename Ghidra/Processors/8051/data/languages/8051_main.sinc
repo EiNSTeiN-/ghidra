@@ -389,14 +389,41 @@ macro subflags(op1, op2) {   # Flags set by sub instructions
 $(CY) = (op1 < op2);        # Check for carry
  #OV = sborrow(op1,op2);      # Check for signed carry
 }
+@if defined(ZW050X)
+macro addWithCarry(operand, carryIn) {
+  local lhs:1 = ACC;
+  local rhs:1 = operand;
+  local c:1 = carryIn;
+  local sum:2 = zext(lhs) + zext(rhs) + zext(c);
+  ACC = sum:1;
+  $(CY) = sum > 0xff;
+  $(AC) = (lhs & 0xf) + (rhs & 0xf) + c > 0xf;
+  $(OV) = ((lhs ^ ACC) & (rhs ^ ACC)) >> 7;
+}
+
+macro subtractWithBorrow(operand) {
+  local lhs:1 = ACC;
+  local rhs:1 = operand;
+  local c:1 = $(CY);
+  local magnitude:2 = zext(rhs) + zext(c);
+  local difference:2 = zext(lhs) - magnitude;
+  ACC = difference:1;
+  $(CY) = zext(lhs) < magnitude;
+  $(AC) = (lhs & 0xf) < ((rhs & 0xf) + c);
+  $(OV) = ((lhs ^ rhs) & (lhs ^ ACC)) >> 7;
+}
+@endif
+
 
 macro compflags(op1, op2) {  # Flags set by the compare instructions
 $(CY) = (op1 < op2);        # Check for carry
 }
 
 macro resultflags(op1) { # Set N,Z flag for results
+@ifndef ZW050X
  $(N) = op1 s< 0;
  $(Z) = op1 == 0;
+@endif
 }
 
 macro push8(val) {
@@ -555,6 +582,21 @@ macro pop16(val) {
 @endif
 
 
+@if defined(ZW050X)
+# The physical PC and stack return address are still 16 bits. Only the
+# analysis CODE coordinates carry a bank in bits 16 and 17.
+macro bankCodeAddress(result, cpu, instructionBank) {
+  result = zext(cpu);
+  if ((cpu & 0x8000) == 0) goto <mapped>;
+  local selectedBank:3 = instructionBank;
+  if (selectedBank != 0) goto <bank_known>;
+  selectedBank = (zext(*[SFR]:1 0xff:1) & 0x30) << 12;
+<bank_known>
+  result = result | selectedBank;
+<mapped>
+}
+@endif
+
 # Operand display only
 CY:      "CY"    is epsilon          { }
 
@@ -564,6 +606,14 @@ DPTRreg: DPTR    is ophi & DPTR      { export DPTR; }
 
 @if defined(MCS251)
 ADPTR:   "@A+"^DPTR is ophi & DPTR		{ ptr:3 = 0xff0000 + zext(DPTR) + zext(ACC); export ptr; }
+@elif defined(ZW050X)
+ADPTR:   "@A+"^DPTR is ophi & DPTR {
+  local cpu:2 = DPTR + zext(ACC);
+  local ptr:3;
+  local selectedBank:3 = inst_start & 0x30000;
+  bankCodeAddress(ptr, cpu, selectedBank);
+  export ptr;
+}
 @elif defined(MCS51)  || defined(CIP51)
 ADPTR:   "@A+"^DPTR is ophi & DPTR		{ ptr:$(PTRSIZE) = zext(DPTR) + zext(ACC); export ptr; }
 @elif defined(MCS80390)
@@ -572,7 +622,17 @@ ADPTR:   "@A+"^DPTR is ophi & DPTR		{ ptr:3 = zext(DPTR) + zext(ACC); export ptr
 ADPTR:   "@A+"^DPTR is ophi & DPTR		{ ptr:3 = 0x800000 + zext(DPTR) + zext(ACC); export ptr; }
 @endif
 
+@if defined(ZW050X)
+APC:     "@A+PC" is epsilon {
+  local cpu:2 = inst_next + zext(ACC);
+  local ptr:3;
+  local selectedBank:3 = inst_start & 0x30000;
+  bankCodeAddress(ptr, cpu, selectedBank);
+  export ptr;
+}
+@else
 APC:     "@A+PC"    is epsilon			{ tmp:$(PTRSIZE) = inst_next + zext(ACC); export tmp; }
+@endif
 
 @if defined(MCS251)
 ATDPTR:  "@"^DPTR   is ophi	& DPTR	{ ptr:3 = 0x010000 + zext(DPTR); export *:1 ptr; } # 8051 External data address mapped into RAM space
@@ -594,6 +654,12 @@ Ri:      @ri       is ri      { export *[INTMEM]:1 ri; }
 
 @if defined(MCS251)
 RiX:     @ri       is ri      { ptr:3 = 0x010000 + zext(ri); export *:1 ptr; } # 8051 8-bit External data address mapped into RAM space
+@elif defined(ZW050X)
+RiX: @ri is ri {
+  local page:1 = *[SFR]:1 0xa0:1;
+  local ptr:2 = (zext(page) << 8) | zext(ri);
+  export *[EXTMEM]:1 ptr;
+}
 @elif defined(MCS51)  || defined(CIP51)
 RiX:     @ri       is ri      { ptr:2 = zext(ri); export *[EXTMEM]:1 ptr; } # limited to 8-bit external data address (I/O state can be used to produce 16-bit addr)
 @elif defined(MCS80390) 
@@ -616,6 +682,9 @@ Direct:  mainreg   is bank=0 & mainreg	{ tmp:3 = mainreg + 0x7f0000; export *[RA
 Direct:  mainreg   is bank=0 & mainreg	{ export *[INTMEM]:1 mainreg; }
 @endif
 Direct:  direct    is bank=1 & direct 	{ export *[SFR]:1 direct; }
+@if defined(ZW050X)
+Direct:  SP        is bank=1 & direct=0x81 & SP   { export SP; }
+@endif
 Direct:  PSW       is bank=1 & direct=0xD0 & PSW  { export PSW;  }
 Direct:  "A"       is bank=1 & direct=0xE0 	{ export ACC; }
 Direct:  B         is bank=1 & direct=0xF0 & B  { export B;  }
@@ -636,6 +705,9 @@ Direct2:  mainreg2  is bank2=0 & mainreg2	{ tmp:3 = mainreg2 + 0x7f0000; export 
 Direct2:  mainreg2  is bank2=0 & mainreg2	{ export *[INTMEM]:1 mainreg2; }
 @endif
 Direct2: direct2   is bank2=1 & direct2  	{ export *[SFR]:1 direct2; }
+@if defined(ZW050X)
+Direct2: SP        is bank2=1 & direct2=0x81 & SP { export SP; }
+@endif
 Direct2: PSW       is bank2=1 & direct2=0xD0 & PSW  { export PSW;  }
 Direct2: "A"       is bank2=1 & direct2=0xE0	{ export ACC; }
 Direct2:  B        is bank2=1 & direct2=0xF0 & B  { export B;  }
@@ -681,6 +753,15 @@ BitByteAddr: byteaddr 	is bitbank=0 & lowbyte & sfrbit [ byteaddr = lowbyte + 0x
 @if defined(MCS251) || defined(MX51) || defined(CIP51)
 Addr11: relAddr is aopaddr & adata [ relAddr = (inst_next $and 0xfff800)+(aopaddr*256)+adata; ]  { export *:1 relAddr; }
 Addr16: addr is addr16 [ addr = (inst_next $and 0xff0000) + addr16; ] { export *:1 addr; }
+@elif defined(ZW050X)
+# The 11-bit form uses the following hardware PC's page, including 16-bit wrap.
+Addr11: target is aopaddr & adata [
+  target = (inst_next $and 0xf800) + (aopaddr << 8) + adata +
+    (inst_start $and 0x30000) * ((inst_next >> 15) $and 1);
+] { export *:1 target; }
+Addr16: target is addr16 [
+  target = addr16 + (inst_start $and 0x30000) * (addr16 >> 15);
+] { export *:1 target; }
 @elif defined(MCS51)
 Addr11: relAddr is aopaddr & adata [ relAddr =(inst_next $and 0xf800)+(aopaddr*256)+adata; ]  { export *:1 relAddr; }
 Addr16: addr16 is addr16 { export *:1 addr16; }
@@ -689,7 +770,14 @@ Addr19: relAddr is aopaddr & adata [ relAddr =(inst_next $and 0xf80000)+(aopaddr
 Addr24: addr24 is addr24 { export *:1 addr24; }
 @endif
 
+@if defined(ZW050X)
+Rel8: target is rel8 [
+  target = ((inst_next + rel8) $and 0xffff) +
+    (inst_start $and 0x30000) * (((inst_next + rel8) >> 15) $and 1);
+] { export *:1 target; }
+@else
 Rel8:   relAddr is rel8		     [ relAddr=inst_next+rel8; ]      { export *:1 relAddr; }
+@endif
 Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAddr; }
 
 @if defined(MCS251)
@@ -704,15 +792,29 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :ACALL  Addr11 is  $(GROUP1) & aaddrfill=1 & aoplo=1 & Addr11   { ret:2 = inst_next; push16(ret); call Addr11; }
 @endif
 
+@if defined(ZW050X)
+:ADD Areg,rn      is $(GROUP2) & ophi=2          & Areg & rnfill=1 & rn { addWithCarry(rn, 0:1); }
+:ADD Areg,Direct  is $(GROUP1) & ophi=2 & oplo=5 & Areg; Direct { addWithCarry(Direct, 0:1); }
+:ADD Areg,Ri      is $(GROUP2) & ophi=2          & Areg & rifill=3 & Ri { addWithCarry(Ri, 0:1); }
+:ADD Areg,Data    is $(GROUP1) & ophi=2 & oplo=4 & Areg; Data { addWithCarry(Data, 0:1); }
+@else
 :ADD Areg,rn      is $(GROUP2) & ophi=2          & Areg & rnfill=1 & rn 	 { addflags(ACC,rn); ACC = ACC + rn; resultflags(ACC); }
 :ADD Areg,Direct  is $(GROUP1) & ophi=2 & oplo=5 & Areg; Direct  { addflags(ACC,Direct); ACC = ACC + Direct; resultflags(ACC); }
 :ADD Areg,Ri      is $(GROUP2) & ophi=2          & Areg & rifill=3 & Ri	 { addflags(ACC,Ri); ACC = ACC + Ri; resultflags(ACC); }
 :ADD Areg,Data    is $(GROUP1) & ophi=2 & oplo=4 & Areg; Data    { addflags(ACC,Data); ACC = ACC + Data; resultflags(ACC); }
+@endif
 
+@if defined(ZW050X)
+:ADDC Areg,rn     is $(GROUP2) & ophi=3          & Areg & rnfill=1 & rn { addWithCarry(rn, $(CY)); }
+:ADDC Areg,Direct is $(GROUP1) & ophi=3 & oplo=5 & Areg; Direct { addWithCarry(Direct, $(CY)); }
+:ADDC Areg,Ri     is $(GROUP2) & ophi=3          & Areg & rifill=3 & Ri { addWithCarry(Ri, $(CY)); }
+:ADDC Areg,Data   is $(GROUP1) & ophi=3 & oplo=4 & Areg; Data { addWithCarry(Data, $(CY)); }
+@else
 :ADDC Areg,rn     is $(GROUP2) & ophi=3          & Areg & rnfill=1 & rn	   { tmp:1 =$(CY)+ rn; addflags(ACC,tmp); ACC = ACC + tmp; resultflags(ACC); }
 :ADDC Areg,Direct is $(GROUP1) & ophi=3 & oplo=5 & Areg; Direct    { tmp:1 =$(CY)+ Direct; addflags(ACC,tmp); ACC = ACC + tmp; resultflags(ACC); }
 :ADDC Areg,Ri     is $(GROUP2) & ophi=3          & Areg & rifill=3 & Ri	   { tmp:1 =$(CY)+ Ri; addflags(ACC,tmp); ACC = ACC + tmp; resultflags(ACC); }
 :ADDC Areg,Data   is $(GROUP1) & ophi=3 & oplo=4 & Areg; Data      {  tmp:1 =$(CY)+ Data; addflags(ACC,tmp); ACC = ACC + tmp; resultflags(ACC); }
+@endif
 
 #TODO: which GROUP does AJMP belong to ??
 @if defined(MCS80390)
@@ -829,7 +931,7 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 @if defined(MCS80390)
 :LCALL Addr24 is $(GROUP1) & ophi=1 & oplo=2; Addr24	{  ret:$(PTRSIZE) = inst_next; push24(ret); call Addr24; }
 :LJMP Addr24  is $(GROUP1) & ophi=0 & oplo=2; Addr24	{ goto Addr24; }
-@elif defined(MX51)
+@elif defined(MX51) || defined(ZW050X)
 :LCALL Addr16 is $(GROUP1) & ophi=1 & oplo=2; Addr16	{  ret:2 = inst_next; push16(ret); call Addr16; }
 :LJMP Addr16  is $(GROUP1) & ophi=0 & oplo=2; Addr16	{ goto Addr16; }
 @else
@@ -911,6 +1013,12 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :RET  is $(GROUP1) & ophi=2 & oplo=2	{
 @if defined(MCS251) || defined(MX51)
 pc:2 = 0; pop16(pc); pc3:3 = (inst_next & 0xff0000) + zext(pc); return[pc3];
+@elif defined(ZW050X)
+local cpu:2 = 0;
+pop16(cpu);
+local target:3;
+bankCodeAddress(target, cpu, 0:3);
+return [target];
 @elif defined(MCS51) || defined(CIP51)
 pc:2 = 0; pop16(pc); return[pc];
 @elif defined(MCS80390)
@@ -921,6 +1029,12 @@ pc:3 = 0; pop24(pc); return[pc];
 :RETI is $(GROUP1) & ophi=3 & oplo=2	{
 @if defined(MCS251) || defined(MX51)
 pc:2 = 0; pop16(pc); pc3:3 = (inst_next & 0xff0000) + zext(pc); return[pc3];
+@elif defined(ZW050X)
+local cpu:2 = 0;
+pop16(cpu);
+local target:3;
+bankCodeAddress(target, cpu, 0:3);
+return [target];
 @elif defined(MCS51) || defined(CIP51)
 pc:2 = 0; pop16(pc); return[pc];
 @elif defined(MCS80390)
@@ -946,10 +1060,17 @@ pc:3 = 0; pop24(pc); return[pc];
 
 :SJMP Rel8        is $(GROUP1) & ophi=8 & oplo=0; Rel8			{ goto Rel8; }
 
+@if defined(ZW050X)
+:SUBB Areg,rn     is $(GROUP2) & ophi=9 & rnfill=1 & rn & Areg { subtractWithBorrow(rn); }
+:SUBB Areg,Direct is $(GROUP1) & ophi=9 & oplo=5 & Areg; Direct { subtractWithBorrow(Direct); }
+:SUBB Areg,Ri     is $(GROUP2) & ophi=9 & Areg & rifill=3 & Ri { subtractWithBorrow(Ri); }
+:SUBB Areg,Data   is $(GROUP1) & ophi=9 & oplo=4 & Areg; Data { subtractWithBorrow(Data); }
+@else
 :SUBB Areg,rn     is $(GROUP2) & ophi=9 & rnfill=1 & rn & Areg				{  tmp : 1 = rn+$(CY); subflags(ACC,tmp); ACC = ACC - tmp; }
 :SUBB Areg,Direct is $(GROUP1) & ophi=9 & oplo=5 & Areg; Direct	{  tmp:1 = Direct+$(CY); subflags(ACC,tmp); ACC = ACC - tmp; }
 :SUBB Areg,Ri     is $(GROUP2) & ophi=9 & Areg & rifill=3 & Ri				{  local tmp = Ri+$(CY); subflags(ACC,tmp); ACC = ACC - tmp; }
 :SUBB Areg,Data   is $(GROUP1) & ophi=9 & oplo=4 & Areg; Data	{ tmp:1 = Data+$(CY); subflags(ACC,tmp); ACC = ACC - tmp; }
+@endif
 
 :SWAP  Areg       is $(GROUP1) & ophi=12 & oplo=4 & Areg		{ ACC = (ACC>>4) | (ACC<<4); }
 

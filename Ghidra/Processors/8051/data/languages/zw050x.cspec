@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<compiler_spec>
+  <data_organization>
+    <pointer_size value="2"/>
+    <integer_size value="2"/>
+  </data_organization>
+  <global>
+    <range space="CODE"/>
+    <range space="INTMEM"/>
+    <range space="SFR"/>
+    <range space="EXTMEM"/>
+    <range space="BITS"/>
+  </global>
+  <stackpointer register="SP" space="INTMEM" growth="positive"/>
+  <!-- Keil REGPARMS integer slots: R7/R6:R7, R5/R4:R5, R3/R2:R3.
+       Generic pointers and compiler helpers can use custom storage. -->
+  <default_proto>
+    <prototype name="__keil_c51" extrapop="-2" stackshift="-2" strategy="register">
+      <input>
+        <pentry minsize="1" maxsize="2"><register name="R6R7"/></pentry>
+        <pentry minsize="1" maxsize="2"><register name="R4R5"/></pentry>
+        <pentry minsize="4" maxsize="4"><register name="R4R5R6R7"/></pentry>
+        <pentry minsize="1" maxsize="2"><register name="R2R3"/></pentry>
+      </input>
+      <output>
+        <pentry minsize="1" maxsize="2"><register name="R6R7"/></pentry>
+        <pentry minsize="4" maxsize="4"><register name="R4R5R6R7"/></pentry>
+      </output>
+      <unaffected><register name="SP"/></unaffected>
+    </prototype>
+  </default_proto>
+</compiler_spec>

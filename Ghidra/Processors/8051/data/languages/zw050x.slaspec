@@ -1,0 +1,5 @@
+@define MCS51 ""
+@define ZW050X ""
+@define PTRSIZE 3
+
+@include "8051_main.sinc"
