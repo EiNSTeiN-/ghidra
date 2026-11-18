@@ -2,7 +2,8 @@
 <processor_spec>
   <programcounter register="PC"/>
   <volatile outputop="write_volatile" inputop="read_volatile">
-    <range space="SFR" first="0x80" last="0xff"/>
+    <!-- SFRPAGE is control state used to translate CODE addresses in p-code. -->
+    <range space="SFR" first="0x80" last="0xfe"/>
     <range space="BITS" first="0x80" last="0xff"/>
   </volatile>
   <default_symbols>
