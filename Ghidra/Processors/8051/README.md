@@ -26,5 +26,7 @@ The default compiler model places scalar parameters and results in Keil
 C51 register slots. Generic pointers and compiler runtime helpers may
 require custom function storage. Keil linker bank entries can be
 represented as Ghidra thunks after checking each entry's DPTR immediate
-and bank gate against the image. Register-bank aliases, interrupt state,
-and peripheral behavior are outside this static model.
+and bank gate against the image. Direct IDATA operands 00–07 alias R0–R7
+under the compiler model's register-bank-0 assumption. PSW-driven changes
+to the active register bank, interrupt state, and peripheral behavior
+require separate analysis.

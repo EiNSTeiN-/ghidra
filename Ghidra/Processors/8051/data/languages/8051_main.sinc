@@ -299,6 +299,10 @@ define token AddrByte (8)
    sfrlo   = (0,3)
    mainreg = (0,6)
    direct17  = (1,7)
+@if defined(ZW050X)
+   bank0reg  = (0,2)
+   bank0high = (3,7)
+@endif
 ;
 define token AddrByte2 (8)
    direct2  = (0,7)
@@ -307,6 +311,10 @@ define token AddrByte2 (8)
    sfr26    = (6,6)
    sfr2lo   = (0,3)
    mainreg2 = (0,6)
+@if defined(ZW050X)
+   bank0reg2  = (0,2)
+   bank0high2 = (3,7)
+@endif
 ;
 define token BitByte (8)
    bitaddr8 = (0,7)
@@ -360,6 +368,9 @@ define token aopword (16)
 
 attach variables  rn [ R0 R1 R2 R3 R4 R5 R6 R7 ];
 attach variables  ri [ R0 R1 ];
+@if defined(ZW050X)
+attach variables [ bank0reg bank0reg2 ] [ R0 R1 R2 R3 R4 R5 R6 R7 ];
+@endif
 
 # flags macros
 
@@ -683,6 +694,9 @@ Direct:  mainreg   is bank=0 & mainreg	{ export *[INTMEM]:1 mainreg; }
 @endif
 Direct:  direct    is bank=1 & direct 	{ export *[SFR]:1 direct; }
 @if defined(ZW050X)
+# The Keil bank-0 model shares these fixed IDATA addresses with the
+# named registers. Print the original direct operand in the listing.
+Direct:  mainreg   is bank0high=0 & mainreg & bank0reg { export bank0reg; }
 Direct:  SP        is bank=1 & direct=0x81 & SP   { export SP; }
 @endif
 Direct:  PSW       is bank=1 & direct=0xD0 & PSW  { export PSW;  }
@@ -706,6 +720,7 @@ Direct2:  mainreg2  is bank2=0 & mainreg2	{ export *[INTMEM]:1 mainreg2; }
 @endif
 Direct2: direct2   is bank2=1 & direct2  	{ export *[SFR]:1 direct2; }
 @if defined(ZW050X)
+Direct2: mainreg2  is bank0high2=0 & mainreg2 & bank0reg2 { export bank0reg2; }
 Direct2: SP        is bank2=1 & direct2=0x81 & SP { export SP; }
 @endif
 Direct2: PSW       is bank2=1 & direct2=0xD0 & PSW  { export PSW;  }
