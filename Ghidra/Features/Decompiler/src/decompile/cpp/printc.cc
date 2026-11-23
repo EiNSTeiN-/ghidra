@@ -1804,12 +1804,36 @@ bool PrintC::pushPtrCodeConstant(uintb val,const TypePointer *ct,
   return false;
 }
 
+/// Print the XDATA target of a typed Keil C51 pointer. The third byte stays
+/// in the constant Varnode for data flow and for code that stores the tag.
+bool PrintC::pushKeilGenericPointer(uintb val,const Datatype *ct,const PcodeOp *op)
+
+{
+  if (ct->getSize() != 3 || (val >> 16) != 1 || ct->getName() != "keil_generic_ptr"
+      || ct->getTypedef() == (Datatype *)0 || !glb->hasModel("__keil_c51"))
+    return false;
+  AddrSpace *space = glb->getSpaceByName("EXTMEM");
+  if (space == (AddrSpace *)0 || space->getAddrSize() != 2)
+    return false;
+  Address addr(space,val & 0xffff);
+  const Scope *scope = glb->symboltab->getGlobalScope();
+  Address usepoint = op != (const PcodeOp *)0 ? op->getAddr() : Address();
+  SymbolEntry *entry = scope->queryByAddr(addr,usepoint);
+  if (entry == (SymbolEntry *)0)
+    return false;
+  pushOp(&addressof,op);
+  pushSymbol(entry->getSymbol(),(const Varnode *)0,op);
+  return true;
+}
+
 void PrintC::pushConstant(uintb val,const Datatype *ct,tagtype tag,
 			  const Varnode *vn,const PcodeOp *op,uint4 displayFormat)
 {
   Datatype *subtype;
   switch(ct->getMetatype()) {
   case TYPE_UINT:
+    if (displayFormat == 0 && pushKeilGenericPointer(val,ct,op))
+      return;
     if (ct->isCharPrint())
       pushCharConstant(val,(TypeChar *)ct,tag,vn,op);
     else if (ct->isEnumType())

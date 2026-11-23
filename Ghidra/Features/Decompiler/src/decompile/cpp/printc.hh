@@ -174,6 +174,7 @@ protected:
 				   const PcodeOp *op);
   bool pushPtrCodeConstant(uintb val,const TypePointer *ct,const Varnode *vn,
 			   const PcodeOp *op);
+  bool pushKeilGenericPointer(uintb val,const Datatype *ct,const PcodeOp *op);
   virtual bool doEmitWideCharPrefix(void) const;
   
   bool checkArrayDeref(const Varnode *vn) const;	///< Determine whether a LOAD/STORE expression requires pointer '*' syntax

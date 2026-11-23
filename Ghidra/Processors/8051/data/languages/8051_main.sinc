@@ -210,7 +210,24 @@ define register offset=0x4a  size=2 [ DPTR2 ];
 define register offset=$(DPS_REG_NUM) size=1 [ AUXR1 ]; # Bit 0 is DPS
 @endif
 
-@define CY 		"PSW[7,1]"
+@if defined(ZW050X)
+# A byte-sized p-code register holds the 8051's one-bit carry so a
+# function prototype can use it as return storage.
+define register offset=0x49 size=1 [ Carry ];
+@define CY "Carry"
+@define DIRECT_WRITE "Direct & DirectCommit"
+@define DIRECT2_WRITE "Direct2 & Direct2Commit"
+@define COMMIT_DIRECT "build DirectCommit;"
+@define COMMIT_DIRECT2 "build Direct2Commit;"
+@define PACK_PSW "PSW = (PSW & 0x7f) | (Carry << 7);"
+@else
+@define CY "PSW[7,1]"
+@define DIRECT_WRITE "Direct"
+@define DIRECT2_WRITE "Direct2"
+@define COMMIT_DIRECT ""
+@define COMMIT_DIRECT2 ""
+@define PACK_PSW ""
+@endif
 @define AC  	"PSW[6,1]"
 @define N   	"PSW[5,1]"
 @define RS1  	"PSW[4,1]"
@@ -699,7 +716,7 @@ Direct:  direct    is bank=1 & direct 	{ export *[SFR]:1 direct; }
 Direct:  mainreg   is bank0high=0 & mainreg & bank0reg { export bank0reg; }
 Direct:  SP        is bank=1 & direct=0x81 & SP   { export SP; }
 @endif
-Direct:  PSW       is bank=1 & direct=0xD0 & PSW  { export PSW;  }
+Direct:  PSW       is bank=1 & direct=0xD0 & PSW  { $(PACK_PSW) export PSW;  }
 Direct:  "A"       is bank=1 & direct=0xE0 	{ export ACC; }
 Direct:  B         is bank=1 & direct=0xF0 & B  { export B;  }
 Direct:  DPL       is bank=1 & direct=0x82 & DPL 	{ export DPL; }
@@ -723,7 +740,7 @@ Direct2: direct2   is bank2=1 & direct2  	{ export *[SFR]:1 direct2; }
 Direct2: mainreg2  is bank0high2=0 & mainreg2 & bank0reg2 { export bank0reg2; }
 Direct2: SP        is bank2=1 & direct2=0x81 & SP { export SP; }
 @endif
-Direct2: PSW       is bank2=1 & direct2=0xD0 & PSW  { export PSW;  }
+Direct2: PSW       is bank2=1 & direct2=0xD0 & PSW  { $(PACK_PSW) export PSW;  }
 Direct2: "A"       is bank2=1 & direct2=0xE0	{ export ACC; }
 Direct2:  B        is bank2=1 & direct2=0xF0 & B  { export B;  }
 Direct2:  DPL      is bank2=1 & direct2=0x82 & DPL 	{ export DPL; }
@@ -733,6 +750,17 @@ Direct2:  DPX      is bank2=1 & direct2=0x93 & DPX  { export DPX;  }
 @endif
 @if defined(MCS251) 
 Direct2:  DPXL     is bank2=1 & direct2=0x84 & DPXL  { export DPXL;  }
+@endif
+
+@if defined(ZW050X)
+# Commit the carry bit only when an instruction writes the whole PSW.
+DirectCommit: is direct { }
+DirectCommit: is direct=0xd0 { Carry = PSW >> 7; }
+Direct2Commit: is direct2 { }
+Direct2Commit: is direct2=0xd0 { Carry = PSW >> 7; }
+
+BitAddr: "CY" is bitbank=1 & sfrbyte=0x1a & sfrbit=7 { export Carry; }
+BitAddr2: "/CY" is bitbank=1 & sfrbyte=0x1a & sfrbit=7 { export Carry; }
 @endif
 
 @if defined(MCS251)
@@ -842,11 +870,17 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :ANL Areg,Direct is $(GROUP1) & ophi=5 & oplo=5 & Areg; Direct		 { ACC = ACC & Direct; resultflags(ACC); }
 :ANL Areg,Ri     is $(GROUP2) & ophi=5 & Areg & rifill=3 & Ri					 { ACC = ACC & Ri; resultflags(ACC); }
 :ANL Areg,Data   is $(GROUP1) & ophi=5 & oplo=4 & Areg; Data		 { ACC = ACC & Data; resultflags(ACC); }
-:ANL Direct,Areg is $(GROUP1) & ophi=5 & oplo=2 & Areg; Direct		 { tmp:1 = Direct & ACC; Direct = tmp; resultflags(tmp); }
-:ANL Direct,Data is $(GROUP1) & ophi=5 & oplo=3; Direct; Data		 { tmp:1 = Direct & Data; Direct = tmp; resultflags(tmp); }
+:ANL Direct,Areg is $(GROUP1) & ophi=5 & oplo=2 & Areg; $(DIRECT_WRITE)		 { tmp:1 = Direct & ACC; Direct = tmp; resultflags(tmp); $(COMMIT_DIRECT) }
+:ANL Direct,Data is $(GROUP1) & ophi=5 & oplo=3; $(DIRECT_WRITE); Data		 { tmp:1 = Direct & Data; Direct = tmp; resultflags(tmp); $(COMMIT_DIRECT) }
 
 :ANL CY,BitAddr   is $(GROUP1) & CY & ophi=8  & oplo=2; BitAddr  & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr {tmp:1 = BitByteAddr; $(CY)=$(CY)& ((tmp>>sfrbit)&1); resultflags(tmp); }
+@if defined(ZW050X)
+:ANL CY,BitAddr   is $(GROUP1) & CY & ophi=8  & oplo=2; BitAddr  & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr {tmp:1 = BitByteAddr; $(CY)=$(CY)& ((tmp>>sfrbit)&1); resultflags(tmp); }
+@endif
 :ANL CY,BitAddr2  is $(GROUP1) & CY & ophi=11 & oplo=0; BitAddr2 & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr {tmp:1 = BitByteAddr; $(CY)=$(CY)& (~((tmp>>sfrbit)&1));  }
+@if defined(ZW050X)
+:ANL CY,BitAddr2  is $(GROUP1) & CY & ophi=11 & oplo=0; BitAddr2 & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr {tmp:1 = BitByteAddr; $(CY)=$(CY)& (~((tmp>>sfrbit)&1));  }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :ANL CY,BitAddr   is $(GROUP1) & CY & ophi=8  & oplo=2; BitAddr  & sfrbit & BitByteAddr {$(CY)=$(CY)& BitAddr; }
 :ANL CY,BitAddr2  is $(GROUP1) & CY & ophi=11 & oplo=0; BitAddr2 & sfrbit & BitByteAddr {$(CY)=$(CY)& ~BitAddr2; }
@@ -867,6 +901,9 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :CLR CY    is $(GROUP1) & CY & ophi=12 & oplo=3				     {$(CY)= 0; }
 
 :CLR BitAddr  is $(GROUP1) & ophi=12 & oplo=2; BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr {  local tmp = ~(1<<sfrbit); BitByteAddr = BitByteAddr & tmp; }
+@if defined(ZW050X)
+:CLR BitAddr  is $(GROUP1) & ophi=12 & oplo=2; BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr {  local tmp = ~(1<<sfrbit); BitByteAddr = BitByteAddr & tmp; }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :CLR BitAddr  is $(GROUP1) & ophi=12 & oplo=2; BitAddr & sfrbit & BitByteAddr { BitAddr = 0; }
 @elif BIT_OPS == "PCODEOPS"
@@ -880,6 +917,9 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :CPL CY    is $(GROUP2) & CY & ophi=11 & oplo=3					     {$(CY)=$(CY)^ 1; }
 
 :CPL BitAddr  is $(GROUP1) & ophi=11 & oplo=2; BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr { tmp:1 = (1<<sfrbit); BitByteAddr = BitByteAddr ^ tmp; }
+@if defined(ZW050X)
+:CPL BitAddr  is $(GROUP1) & ophi=11 & oplo=2; BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr { tmp:1 = (1<<sfrbit); BitByteAddr = BitByteAddr ^ tmp; }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :CPL BitAddr  is $(GROUP1) & ophi=11 & oplo=2; BitAddr & sfrbit & BitByteAddr { BitAddr = BitAddr ^ 1; }
 @elif BIT_OPS == "PCODEOPS"
@@ -888,22 +928,47 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :CPL BitAddr  is $(GROUP1) & ophi=11 & oplo=2; BitAddr & sfrbit	& BitByteAddr { tmp:1 = (1<<sfrbit); BitByteAddr = BitByteAddr ^ tmp; }
 @endif
 
+@if defined(ZW050X)
+:DA Areg is $(GROUP1) & ophi=13 & oplo=4 & Areg {
+  local adjustLow:1 = ((ACC & 0xf) > 9) | $(AC);
+  local sum:2 = zext(ACC) + zext(adjustLow) * 6;
+  Carry = Carry | (sum > 0xff);
+  local adjustHigh:1 = ((sum & 0xf0) > 0x90) | Carry;
+  sum = sum + zext(adjustHigh) * 0x60;
+  Carry = Carry | (sum > 0xff);
+  ACC = sum:1;
+}
+@else
 :DA Areg    is $(GROUP1) & ophi=13 & oplo=4 & Areg    { ACC = decimal_adjust(ACC); }
+
+@endif
 
 :DEC Areg   is $(GROUP1) & ophi=1 & oplo=4 & Areg	  { ACC = ACC - 1; }
 :DEC rn     is $(GROUP2) & ophi=1 & rnfill=1 & rn			      { rn = rn - 1; }
-:DEC Direct is $(GROUP1) & ophi=1 & oplo=5; Direct	  { Direct = Direct - 1; }
+:DEC Direct is $(GROUP1) & ophi=1 & oplo=5; $(DIRECT_WRITE)	  { Direct = Direct - 1; $(COMMIT_DIRECT) }
 :DEC Ri     is $(GROUP2) & ophi=1 & rifill=3 & Ri			      { Ri = Ri - 1; }
 
+@if defined(ZW050X)
+:DIV ABreg is $(GROUP1) & ophi=8 & oplo=4 & ABreg {
+  Carry = 0;
+  $(OV) = B == 0;
+  if (B == 0) goto inst_next;
+  local dividend:1 = ACC;
+  ACC = dividend / B;
+  B = dividend % B;
+}
+@else
 :DIV ABreg     is $(GROUP1) & ophi=8 & oplo=4 & ABreg		  { PSW = PSW & 0x7b;  tmp : 1 = (B == 0)<<2; PSW = PSW | tmp; if (B==0) goto inst_next;  tmp2 : 1 = ACC; ACC = tmp2 / B; B = tmp2 % B; }
+
+@endif
 
 # Specifying rnfill here is a temporary to allow distinguishing DJNZ1 and XCHD
 :DJNZ rn,Rel8     is $(GROUP2) & ophi=13 & rnfill=1 & rnfill=1 & rn; Rel8	 { rn = rn - 1; if (rn!=0) goto Rel8; }
-:DJNZ Direct,Rel8 is $(GROUP1) & ophi=13 & oplo=5; Direct; Rel8	 { Direct = Direct - 1; if (Direct!=0) goto Rel8; }
+:DJNZ Direct,Rel8 is $(GROUP1) & ophi=13 & oplo=5; $(DIRECT_WRITE); Rel8	 { Direct = Direct - 1; $(COMMIT_DIRECT) if (Direct!=0) goto Rel8; }
 
 :INC Areg    is $(GROUP1) & ophi=0 & oplo=4 & Areg		{ ACC = ACC + 1; }
 :INC rn      is $(GROUP2) & ophi=0 & rnfill=1 & rn				    { rn = rn + 1; }
-:INC Direct  is $(GROUP1) & ophi=0 & oplo=5; Direct		{ Direct = Direct + 1; }
+:INC Direct  is $(GROUP1) & ophi=0 & oplo=5; $(DIRECT_WRITE)		{ Direct = Direct + 1; $(COMMIT_DIRECT) }
 @if defined(DUAL_DPTR) && defined(DPS_REG_NUM)
 :INC Direct  is $(GROUP1) & ophi=0 & oplo=5; Direct & direct=$(DPS_REG_NUM)   { 
    AUXR1 = AUXR1 ^ 0x01;
@@ -916,7 +981,13 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :INC DPTRreg is $(GROUP1) & ophi=10 & oplo=3 & DPTRreg  { DPTR = DPTR + 1; }
 
 :JB  BitAddr,Rel8 is $(GROUP1) & ophi=2 & oplo=0; BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr; Rel8	 { if (((BitByteAddr>>sfrbit)&1) == 1:1) goto Rel8; }
+@if defined(ZW050X)
+:JB  BitAddr,Rel8 is $(GROUP1) & ophi=2 & oplo=0; BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr; Rel8	 { if (((BitByteAddr>>sfrbit)&1) == 1:1) goto Rel8; }
+@endif
 :JBC BitAddr,Rel8 is $(GROUP1) & ophi=1 & oplo=0; BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr; Rel8	 { tmp:1 = 1<<sfrbit; if ((BitByteAddr & tmp)==0) goto inst_next; BitByteAddr = BitByteAddr & ~tmp; goto Rel8; }
+@if defined(ZW050X)
+:JBC BitAddr,Rel8 is $(GROUP1) & ophi=1 & oplo=0; BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr; Rel8	 { tmp:1 = 1<<sfrbit; if ((BitByteAddr & tmp)==0) goto inst_next; BitByteAddr = BitByteAddr & ~tmp; goto Rel8; }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :JB  BitAddr,Rel8 is $(GROUP1) & ophi=2 & oplo=0; BitAddr & sfrbit & BitByteAddr; Rel8	 { if (BitAddr == 1:1) goto Rel8; }
 :JBC BitAddr,Rel8 is $(GROUP1) & ophi=1 & oplo=0; BitAddr & sfrbit & BitByteAddr; Rel8	 { if (BitAddr == 0:1) goto inst_next; BitAddr = 0; goto Rel8; }
@@ -931,6 +1002,9 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :JMP ADPTR is $(GROUP1) & ophi=7 & oplo=3 & ADPTR					 { goto [ADPTR]; }
 
 :JNB BitAddr,Rel8 is $(GROUP1) & ophi=3 & oplo=0; BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr; Rel8  { if (((BitByteAddr>>sfrbit)&1)==0:1) goto Rel8; }
+@if defined(ZW050X)
+:JNB BitAddr,Rel8 is $(GROUP1) & ophi=3 & oplo=0; BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr; Rel8  { if (((BitByteAddr>>sfrbit)&1)==0:1) goto Rel8; }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :JNB BitAddr,Rel8 is $(GROUP1) & ophi=3 & oplo=0; BitAddr & sfrbit & BitByteAddr; Rel8  { if (BitAddr == 0:1) goto Rel8; }
 @elif BIT_OPS == "PCODEOPS"
@@ -961,11 +1035,11 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :MOV rn,Areg        is $(GROUP2) & ophi=15 & rnfill=1 & rn & Areg					 { rn = ACC; }
 :MOV rn,Direct      is $(GROUP2) & ophi=10 & rnfill=1 & rn; Direct				     { rn = Direct; }
 :MOV rn,Data        is $(GROUP2) & ophi=7 & rnfill=1 & rn; Data				 { rn = Data; }
-:MOV Direct,Areg    is $(GROUP1) & ophi=15 & oplo=5 & Areg; Direct		 { Direct = ACC; }
-:MOV Direct,rn      is $(GROUP2) & ophi=8 & rnfill=1 & rn; Direct					 { Direct = rn; }
-:MOV Direct2,Direct is $(GROUP1) & ophi=8 & oplo=5; Direct; Direct2	     { Direct2 = Direct; }
-:MOV Direct,Ri      is $(GROUP2) & ophi=8 & rifill=3 & Ri; Direct					 { Direct = Ri; }
-:MOV Direct,Data    is $(GROUP1) & ophi=7 & oplo=5; Direct; Data		 { Direct = Data; }
+:MOV Direct,Areg    is $(GROUP1) & ophi=15 & oplo=5 & Areg; $(DIRECT_WRITE)		 { Direct = ACC; $(COMMIT_DIRECT) }
+:MOV Direct,rn      is $(GROUP2) & ophi=8 & rnfill=1 & rn; $(DIRECT_WRITE)					 { Direct = rn; $(COMMIT_DIRECT) }
+:MOV Direct2,Direct is $(GROUP1) & ophi=8 & oplo=5; Direct; $(DIRECT2_WRITE)	     { Direct2 = Direct; $(COMMIT_DIRECT2) }
+:MOV Direct,Ri      is $(GROUP2) & ophi=8 & rifill=3 & Ri; $(DIRECT_WRITE)					 { Direct = Ri; $(COMMIT_DIRECT) }
+:MOV Direct,Data    is $(GROUP1) & ophi=7 & oplo=5; $(DIRECT_WRITE); Data		 { Direct = Data; $(COMMIT_DIRECT) }
 :MOV Ri,Areg        is $(GROUP2) & ophi=15 & rifill=3 & Ri & Areg					 { Ri = ACC; }
 :MOV Ri,Direct      is $(GROUP2) & ophi=10 & rifill=3 & Ri; Direct				     { Ri = Direct; }
 :MOV Ri,Data        is $(GROUP2) & ophi=7 & rifill=3 & Ri; Data					 { Ri = Data; }
@@ -976,7 +1050,13 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 @endif
 
 :MOV CY,BitAddr is $(GROUP1) & CY & ophi=10 & oplo=2;  BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr {$(CY)= (BitByteAddr>>sfrbit)&1; }
+@if defined(ZW050X)
+:MOV CY,BitAddr is $(GROUP1) & CY & ophi=10 & oplo=2;  BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr {$(CY)= (BitByteAddr>>sfrbit)&1; }
+@endif
 :MOV BitAddr,CY is $(GROUP1) & CY & ophi=9  & oplo=2;  BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr { BitByteAddr = BitByteAddr & (~(1<<sfrbit)); BitByteAddr = BitByteAddr | ($(CY)<<sfrbit); }
+@if defined(ZW050X)
+:MOV BitAddr,CY is $(GROUP1) & CY & ophi=9  & oplo=2;  BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr { BitByteAddr = BitByteAddr & (~(1<<sfrbit)); BitByteAddr = BitByteAddr | ($(CY)<<sfrbit); }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :MOV CY,BitAddr is $(GROUP1) & CY & ophi=10 & oplo=2;  BitAddr & sfrbit & BitByteAddr {$(CY)= BitAddr; }
 :MOV BitAddr,CY is $(GROUP1) & CY & ophi=9  & oplo=2;  BitAddr & sfrbit & BitByteAddr { BitAddr = $(CY); }
@@ -996,7 +1076,17 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :MOVX  RiX,Areg     is $(GROUP2) & ophi=15 & rifill=1 & RiX & Areg	{ RiX = ACC; }
 :MOVX  ATDPTR,Areg  is $(GROUP1) & ophi=15 & oplo=0 & Areg & ATDPTR	{ ATDPTR = ACC; }
 
+@if defined(ZW050X)
+:MUL ABreg is $(GROUP1) & ophi=10 & oplo=4 & ABreg {
+  Carry = 0;
+  local product:2 = zext(ACC) * zext(B);
+  ACC = product(0);
+  B = product(1);
+  $(OV) = B != 0;
+}
+@else
 :MUL ABreg         is $(GROUP1) & ophi=10 & oplo=4 & ABreg	   { PSW = PSW & 0x7b; tmp:2 = zext(ACC) * zext(B); ACC = tmp(0); B = tmp(1); PSW = PSW | ((B!=0)<<2); }
+@endif
 #:MUL Areg,Breg   is $(GROUP1) & ophi=10 & oplo=4 & Areg & Breg { PSW = PSW & 0x7b; tmp:2 = zext(ACC) * zext(B); ACC = tmp(0); B = tmp(1); PSW = PSW | ((B!=0)<<2); }
 
 :NOP             is $(GROUP1) & ophi=0  & oplo=0	{ nop(); }
@@ -1005,11 +1095,17 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :ORL Areg,Direct is $(GROUP1) & ophi=4 & oplo=5 & Areg; Direct		 { ACC = ACC | Direct; }
 :ORL Areg,Ri     is $(GROUP2) & ophi=4 & Areg & rifill=3 & Ri 					 { ACC = ACC | Ri; }
 :ORL Areg,Data   is $(GROUP1) & ophi=4 & oplo=4 & Areg; Data	     { ACC = ACC | Data; }
-:ORL Direct,Areg is $(GROUP1) & ophi=4 & oplo=2 & Areg; Direct		 { Direct = Direct | ACC; }
-:ORL Direct,Data is $(GROUP1) & ophi=4 & oplo=3 & Areg; Direct; Data { Direct = Direct | Data; }
+:ORL Direct,Areg is $(GROUP1) & ophi=4 & oplo=2 & Areg; $(DIRECT_WRITE)		 { Direct = Direct | ACC; $(COMMIT_DIRECT) }
+:ORL Direct,Data is $(GROUP1) & ophi=4 & oplo=3 & Areg; $(DIRECT_WRITE); Data { Direct = Direct | Data; $(COMMIT_DIRECT) }
 
 :ORL CY,BitAddr  is $(GROUP1) & CY & ophi=7  & oplo=2; BitAddr  & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr {$(CY)=$(CY)| ((BitByteAddr>>sfrbit)&1); }
+@if defined(ZW050X)
+:ORL CY,BitAddr  is $(GROUP1) & CY & ophi=7  & oplo=2; BitAddr  & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr {$(CY)=$(CY)| ((BitByteAddr>>sfrbit)&1); }
+@endif
 :ORL CY,BitAddr2 is $(GROUP1) & CY & ophi=10 & oplo=0; BitAddr2 & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr {$(CY)=$(CY)| (((BitByteAddr>>sfrbit)&1)^1); }
+@if defined(ZW050X)
+:ORL CY,BitAddr2 is $(GROUP1) & CY & ophi=10 & oplo=0; BitAddr2 & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr {$(CY)=$(CY)| (((BitByteAddr>>sfrbit)&1)^1); }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :ORL CY,BitAddr  is $(GROUP1) & CY & ophi=7  & oplo=2; BitAddr  & sfrbit & BitByteAddr {$(CY)=$(CY)| BitAddr; }
 :ORL CY,BitAddr2 is $(GROUP1) & CY & ophi=10 & oplo=0; BitAddr2 & sfrbit & BitByteAddr {$(CY)=$(CY)| (BitAddr2^1); }
@@ -1021,7 +1117,7 @@ Rel16:   relAddr is rel16		     [ relAddr=inst_next+rel16; ] { export *:1 relAdd
 :ORL CY,BitAddr2 is $(GROUP1) & CY & ophi=10 & oplo=0; BitAddr2 & sfrbit & BitByteAddr {$(CY)=$(CY)| (((BitByteAddr>>sfrbit)&1)^1); }
 @endif
 
-:POP  Direct is $(GROUP1) & ophi=13 & oplo=0; Direct	{ pop8(Direct); }
+:POP  Direct is $(GROUP1) & ophi=13 & oplo=0; $(DIRECT_WRITE)	{ pop8(Direct); $(COMMIT_DIRECT) }
 
 :PUSH Direct is $(GROUP1) & ophi=12 & oplo=0; Direct	{ push8(Direct); }
 
@@ -1065,6 +1161,9 @@ pc:3 = 0; pop24(pc); return[pc];
 :SETB  CY is $(GROUP1) & CY & ophi=13 & oplo=3					 { $(CY)=1; }
 
 :SETB BitAddr is $(GROUP1) & ophi=13 & oplo=2; BitAddr & bitaddr57=7 & sfrbit3=0 & sfrbit & BitByteAddr { BitByteAddr = BitByteAddr | (1<<sfrbit); }
+@if defined(ZW050X)
+:SETB BitAddr is $(GROUP1) & ophi=13 & oplo=2; BitAddr & sfrbyte=0x1a & sfrbit < 7 & sfrbit & BitByteAddr { BitByteAddr = BitByteAddr | (1<<sfrbit); }
+@endif
 @if BIT_OPS == "BIT_ADDRS"
 :SETB BitAddr is $(GROUP1) & ophi=13 & oplo=2; BitAddr & sfrbit & BitByteAddr { BitAddr = 1; }
 @elif BIT_OPS == "PCODEOPS"
@@ -1090,7 +1189,7 @@ pc:3 = 0; pop24(pc); return[pc];
 :SWAP  Areg       is $(GROUP1) & ophi=12 & oplo=4 & Areg		{ ACC = (ACC>>4) | (ACC<<4); }
 
 :XCH  Areg,rn     is $(GROUP2) & ophi=12 & rnfill=1 & rn & Areg			 {  tmp : 1 = ACC; ACC = rn; rn = tmp; }
-:XCH  Areg,Direct is $(GROUP1) & ophi=12 & oplo=5 & Areg; Direct {  tmp : 1 = ACC; ACC = Direct; Direct = tmp; }
+:XCH  Areg,Direct is $(GROUP1) & ophi=12 & oplo=5 & Areg; $(DIRECT_WRITE) {  tmp : 1 = ACC; ACC = Direct; Direct = tmp; $(COMMIT_DIRECT) }
 :XCH  Areg,Ri     is $(GROUP2) & ophi=12 & rifill=3 & Ri & Areg			 {  tmp : 1 = ACC; ACC = Ri; Ri = tmp; }
 
 # TODO: This instruction appears to be in both GROUP2 & GROUP3 (always available)
@@ -1100,6 +1199,6 @@ pc:3 = 0; pop24(pc); return[pc];
 :XRL Areg,Direct is $(GROUP1) & ophi=6 & oplo=5 & Areg; Direct	{ ACC = ACC ^ Direct; }
 :XRL Areg,Ri     is $(GROUP2) & ophi=6 & rifill=3 & Ri & Areg				{ ACC = ACC ^ Ri; }
 :XRL Areg,Data   is $(GROUP1) & ophi=6 & oplo=4 & Areg; Data	{ ACC = ACC ^ Data; }
-:XRL Direct,Areg is $(GROUP1) & ophi=6 & oplo=2 & Areg; Direct	{ Direct = Direct ^ ACC; }
-:XRL Direct,Data is $(GROUP1) & ophi=6 & oplo=3; Direct; Data	{ Direct = Direct ^ Data; }
+:XRL Direct,Areg is $(GROUP1) & ophi=6 & oplo=2 & Areg; $(DIRECT_WRITE)	{ Direct = Direct ^ ACC; $(COMMIT_DIRECT) }
+:XRL Direct,Data is $(GROUP1) & ophi=6 & oplo=3; $(DIRECT_WRITE); Data	{ Direct = Direct ^ Data; $(COMMIT_DIRECT) }
 

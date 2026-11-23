@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <language_definitions>
-  <language processor="8051" endian="big" size="24" variant="zw050x" version="1.1"
+  <language processor="8051" endian="big" size="24" variant="zw050x" version="1.2"
             slafile="zw050x.sla" processorspec="zw050x.pspec" id="8051:BE:24:zw050x">
     <description>Sigma Designs ZW050x 8051 with banked flash</description>
     <compiler name="Keil C51" spec="zw050x.cspec" id="default"/>
